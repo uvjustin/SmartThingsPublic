@@ -15,7 +15,7 @@
  */
 
 import physicalgraph.zigbee.clusters.iaszone.ZoneStatus
-
+import physicalgraph.zigbee.zcl.DataType
 
 metadata {
 	definition (name: "NYCE Open/Closed Sensor", namespace: "smartthings", author: "NYCE", mnmn: "SmartThings", vid: "generic-contact-3") {
@@ -26,14 +26,12 @@ metadata {
 		capability "Health Check"
 		capability "Sensor"
 
-		command "enrollResponse"
-
-		fingerprint inClusters: "0000,0001,0003,0500,0020", manufacturer: "NYCE", model: "3010", deviceJoinName: "NYCE Door Hinge Sensor"
-		fingerprint inClusters: "0000,0001,0003,0406,0500,0020", manufacturer: "NYCE", model: "3011", deviceJoinName: "NYCE Door/Window Sensor"
-		fingerprint inClusters: "0000,0001,0003,0500,0020", manufacturer: "NYCE", model: "3011", deviceJoinName: "NYCE Door/Window Sensor"
-		fingerprint inClusters: "0000,0001,0003,0406,0500,0020", manufacturer: "NYCE", model: "3014", deviceJoinName: "NYCE Tilt Sensor"
-		fingerprint inClusters: "0000,0001,0003,0500,0020", manufacturer: "NYCE", model: "3014", deviceJoinName: "NYCE Tilt Sensor"
-		fingerprint inClusters: "0000,0001,0003,0020,0500,0B05,FC02", outClusters: "", manufacturer: "sengled", model: "E1D-G73", deviceJoinName: "Sengled Element Door Sensor"
+		fingerprint inClusters: "0000,0001,0003,0500,0020", manufacturer: "NYCE", model: "3010", deviceJoinName: "NYCE Open/Closed Sensor" //NYCE Door Hinge Sensor
+		fingerprint inClusters: "0000,0001,0003,0406,0500,0020", manufacturer: "NYCE", model: "3011", deviceJoinName: "NYCE Open/Closed Sensor" //NYCE Door/Window Sensor
+		fingerprint inClusters: "0000,0001,0003,0500,0020", manufacturer: "NYCE", model: "3011", deviceJoinName: "NYCE Open/Closed Sensor" //NYCE Door/Window Sensor
+		fingerprint inClusters: "0000,0001,0003,0406,0500,0020", manufacturer: "NYCE", model: "3014", deviceJoinName: "NYCE Open/Closed Sensor" //NYCE Tilt Sensor
+		fingerprint inClusters: "0000,0001,0003,0500,0020", manufacturer: "NYCE", model: "3014", deviceJoinName: "NYCE Open/Closed Sensor" //NYCE Tilt Sensor
+		fingerprint inClusters: "0000,0001,0003,0020,0500,0B05,FC02", outClusters: "", manufacturer: "sengled", model: "E1D-G73", deviceJoinName: "Sengled Open/Closed Sensor" //Sengled Element Door Sensor
 	}
 
 	tiles(scale: 2) {
@@ -124,9 +122,16 @@ private Map parseCatchAllMessage(String description) {
 					}
 					break
 				case 0x0001:	// power configuration cluster
-					resultMap.name = 'battery'
-					log.debug "battery value: ${cluster.data.last()}"
-					resultMap.value = getBatteryPercentage(cluster.data.last())
+					Map descMap = zigbee.parseDescriptionAsMap(description)
+					if(descMap.attrInt == 0x0020) {
+						log.debug 'Battery'
+						resultMap.name = 'battery'
+						resultMap.value = getBatteryPercentage(convertHexToInt(descMap.value))
+					} else if (descMap.attrInt == 0x0021) {
+						log.debug 'Battery'
+						resultMap.name = 'battery'
+						resultMap.value = Math.round(Integer.parseInt(descMap.value, 16)/2)
+					}
 					break
 				case 0x0402:	// temperature cluster
 					if (cluster.command == 0x01) {
@@ -173,6 +178,12 @@ private Map parseCatchAllMessage(String description) {
 private int getBatteryPercentage(int value) {
 	def minVolts = 2.3
 	def maxVolts = 3.1
+
+	if(device.getDataValue("manufacturer") == "sengled") {
+		minVolts = 1.8
+		maxVolts = 2.7
+	}
+
 	def volts = value / 10
 	def pct = (volts - minVolts) / (maxVolts - minVolts)
 
@@ -202,17 +213,21 @@ private boolean shouldProcessMessage(cluster) {
 }
 
 private Map parseReportAttributeMessage(String description) {
-	Map descMap = zigbee.parseReadAttrDescription(description)
+	def descMap = zigbee.parseDescriptionAsMap(description)
 	Map resultMap = [:]
 
 	log.debug "parseReportAttributeMessage: descMap ${descMap}"
 
-	switch(descMap.cluster) {
-		case "0001":
-			if(descMap.attrId == "0020") {
+	switch(descMap.clusterInt) {
+		case zigbee.POWER_CONFIGURATION_CLUSTER:
+			if(descMap.attrInt == 0x0020) {
 				log.debug 'Battery'
 				resultMap.name = 'battery'
 				resultMap.value = getBatteryPercentage(convertHexToInt(descMap.value))
+			} else if (descMap.attrInt == 0x0021) {
+				log.debug 'Battery'
+				resultMap.name = 'battery'
+				resultMap.value = Math.round(Integer.parseInt(descMap.value, 16)/2)
 			}
 			break
 		default:
@@ -229,8 +244,6 @@ private List parseIasMessage(String description) {
 	log.debug "parseIasMessage: $description"
 
 	List resultListMap = []
-	Map resultMap_battery = [:]
-	Map resultMap_battery_state = [:]
 	Map resultMap_sensor = [:]
 
 	resultMap_sensor.name = "contact"
@@ -241,8 +254,6 @@ private List parseIasMessage(String description) {
 	log.debug "parseIasMessage: Trouble Status ${zs.trouble}"
 	log.debug "parseIasMessage: Sensor Status ${zs.alarm1}"
 
-	resultListMap << resultMap_battery_state
-	resultListMap << resultMap_battery
 	resultListMap << resultMap_sensor
 
 	return resultListMap
@@ -260,10 +271,13 @@ def configure() {
 	sendEvent(name: "checkInterval", value: 60 * 12, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
 
 	if(device.getDataValue("manufacturer") == "sengled") {
-		return zigbee.readAttribute(zigbee.IAS_ZONE_CLUSTER, zigbee.ATTRIBUTE_IAS_ZONE_STATUS) + zigbee.readAttribute(zigbee.POWER_CONFIGURATION_CLUSTER, 0x0020) + zigbee.batteryConfig(30, 300) + zigbee.enrollResponse()
+		return zigbee.readAttribute(zigbee.IAS_ZONE_CLUSTER, zigbee.ATTRIBUTE_IAS_ZONE_STATUS) + zigbee.readAttribute(zigbee.POWER_CONFIGURATION_CLUSTER, 0x0020) +
+		zigbee.configureReporting(zigbee.IAS_ZONE_CLUSTER, zigbee.ATTRIBUTE_IAS_ZONE_STATUS, DataType.BITMAP16, 30, 300, null) +
+		zigbee.batteryConfig(30, 300) + zigbee.enrollResponse()
 	} else {
 		// battery minReportTime 30 seconds, maxReportTime 5 min. Reporting interval if no activity
-		return zigbee.iasZoneConfig() + zigbee.batteryConfig(30, 300) + refresh() // send refresh cmds as part of config
+		return zigbee.enrollResponse() + zigbee.configureReporting(zigbee.IAS_ZONE_CLUSTER, zigbee.ATTRIBUTE_IAS_ZONE_STATUS, DataType.BITMAP16, 0, 60 * 60, null) +
+				zigbee.batteryConfig(30, 300) + refresh() // send refresh cmds as part of config
 	}
 }
 

@@ -13,16 +13,21 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  */
+import groovy.json.JsonOutput
 
 metadata {
-	definition (name: "Z-Wave Button", namespace: "smartthings", author: "SmartThings") {
+	definition (name: "Z-Wave Button", namespace: "smartthings", author: "SmartThings", ocfDeviceType: "x.com.st.d.remotecontroller", mmnm: "SmartThings", vid: "generic-button-4") {
 		capability "Button"
 		capability "Battery"
 		capability "Sensor"
 		capability "Health Check"
 		capability "Configuration"
 
-		fingerprint mfr: "010F", prod: "0F01", model: "1000", deviceJoinName: "Fibaro Button"
+		fingerprint mfr: "010F", prod: "0F01", model: "1000", deviceJoinName: "Fibaro Button" //Fibaro Button
+		fingerprint mfr: "010F", prod: "0F01", model: "2000", deviceJoinName: "Fibaro Button" //Fibaro Button
+		fingerprint mfr: "010F", prod: "0F01", model: "3000", deviceJoinName: "Fibaro Button" //Fibaro Button
+		fingerprint mfr: "0371", prod: "0102", model: "0004", deviceJoinName: "Aeotec Button" //US //Aeotec NanoMote One
+		fingerprint mfr: "0371", prod: "0002", model: "0004", deviceJoinName: "Aeotec Button" //EU //Aeotec NanoMote One
 	}
 
 	tiles(scale: 2) {
@@ -41,9 +46,14 @@ metadata {
 }
 
 def installed() {
-	sendEvent(name: "checkInterval", value: 8 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
-	sendEvent(name: "numberOfButtons", value: 1)
-	sendEvent(name: "button", value: "pushed", data: [buttonNumber: 1])
+	if (isAeotec()) {
+		sendEvent(name: "DeviceWatch-Enroll", value: JsonOutput.toJson([protocol: "zwave", scheme:"untracked"]), displayed: false)
+	} else {
+		sendEvent(name: "checkInterval", value: 8 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
+	}
+	sendEvent(name: "supportedButtonValues", value: supportedButtonValues.encodeAsJSON(), displayed: false)
+	sendEvent(name: "numberOfButtons", value: 1, displayed: false)
+	sendEvent(name: "button", value: "pushed", data: [buttonNumber: 1], displayed: false)
 	response([
 			secure(zwave.batteryV1.batteryGet()),
 			"delay 2000",
@@ -52,7 +62,7 @@ def installed() {
 }
 
 def configure() {
-	if(zwaveInfo.mfr?.contains("0086"))
+	if (zwaveInfo.mfr?.contains("0086"))
 		[
 			secure(zwave.configurationV1.configurationSet(parameterNumber: 250, scaledConfigurationValue: 1)),	//makes Aeotec Panic Button communicate with primary controller
 		]
@@ -84,12 +94,12 @@ def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulat
 
 def zwaveEvent(physicalgraph.zwave.commands.centralscenev1.CentralSceneNotification cmd) {
 	def value = eventsMap[(int) cmd.keyAttributes]
-	createEvent(name: "button", value: value, descriptionText: "Button was ${value}", data: [buttonNumber: 1])
+	createEvent(name: "button", value: value, descriptionText: "Button was ${value}", data: [buttonNumber: 1], isStateChange: true)
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.sceneactivationv1.SceneActivationSet cmd) {
-	def value = cmd.sceneId % 2 ? "pushed"  : "held"
-	createEvent(name: "button", value: value, descriptionText: "Button was ${value}", data: [buttonNumber: 1])
+	def value = cmd.sceneId % 2 ? "pushed" : "held"
+	createEvent(name: "button", value: value, descriptionText: "Button was ${value}", data: [buttonNumber: 1], isStateChange: true)
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.wakeupv1.WakeUpNotification cmd) {
@@ -124,7 +134,7 @@ def zwaveEvent(physicalgraph.zwave.Command cmd) {
 }
 
 private secure(cmd) {
-	if(zwaveInfo.zw.endsWith("s")) {
+	if(zwaveInfo.zw.contains("s")) {
 		zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
 	} else {
 		cmd.format()
@@ -135,7 +145,7 @@ private getEventsMap() {[
 		0: "pushed",
 		1: "held",
 		2: "down_hold",
-		3: "pushed_2x",
+		3: "double",
 		4: "pushed_3x",
 		5: "pushed_4x",
 		6: "pushed_5x"
@@ -144,3 +154,15 @@ private getEventsMap() {[
 private getCommandClasses() {[
 		0x84: 1
 ]}
+
+private isAeotec() {
+	zwaveInfo.mfr == "0371"
+}
+
+private getSupportedButtonValues() {
+	if (isAeotec()) {
+		["pushed", "held", "down_hold"]
+	} else {
+		["pushed", "held", "down_hold", "double", "pushed_3x", "pushed_4x", "pushed_5x"]
+	}
+}

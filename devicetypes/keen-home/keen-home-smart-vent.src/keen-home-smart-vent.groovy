@@ -21,7 +21,7 @@ metadata {
         command "setZigBeeIdTile"
         command "clearObstruction"
 
-        fingerprint endpoint: "1", profileId: "0104", inClusters: "0000,0001,0003,0004,0005,0006,0008,0020,0402,0403,0B05,FC01,FC02", outClusters: "0019"
+        fingerprint endpoint: "1", profileId: "0104", inClusters: "0000,0001,0003,0004,0005,0006,0008,0020,0402,0403,0B05,FC01,FC02", outClusters: "0019", deviceJoinName: "Keen Home Vent"
     }
 
     // simulator metadata
@@ -370,7 +370,7 @@ def clearObstruction() {
     ] + configure()
 }
 
-def setLevel(value) {
+def setLevel(value, rate = null) {
     log.debug "setting level: ${value}"
     def linkText = getLinkText(device)
 
